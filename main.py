@@ -16,8 +16,7 @@ import job_json
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
 
 # Инициализация бота и диспетчера с хранилищем состояний в памяти
-bot_token = (
-    '6848140179:AAFj3nACX5QlrPv6gx_0_gqtvSAl_9u5GFw')  # Рекомендуется использовать переменные окружения для хранения токенов
+bot_token = ('5184064788:AAHpyj6L6z7A2oSWT0JRvXNZe-6r9varvgU')  # Рекомендуется использовать переменные окружения для хранения токенов
 if not bot_token:
     raise ValueError("Необходимо указать BOT_TOKEN в переменных окружения.")
 
@@ -26,15 +25,14 @@ storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
 
+# Состояния бота для управления финансовыми данными
 class FinanceState(StatesGroup):
     waiting_for_expense_amount = State()
     waiting_for_income_amount = State()
     expense_category = State()
     income_category = State()
-    waiting_for_expense_action = State()
-    waiting_for_income_action = State()  # Новое состояние
     waiting_for_description = State()
-    waiting_for_income_description = State()  # Новое состояние
+
 
 
 # Обработчик команды /start
@@ -173,52 +171,6 @@ async def handle_output(callback_query: types.CallbackQuery):
     await callback_query.answer()
 
 
-@dp.callback_query_handler(lambda c: c.data == 'get_description', state=FinanceState.waiting_for_expense_action)
-async def handle_get_description(callback_query: types.CallbackQuery, state: FSMContext):
-    user_data = await state.get_data()
-    category = user_data.get('expense_category')
-    amount = user_data.get('expense_amount')
-
-    if not category or not amount:
-        await callback_query.message.reply("Не удалось получить данные операции. Попробуйте еще раз.")
-        await state.finish()
-        return
-
-    await FinanceState.waiting_for_description.set()
-    await callback_query.message.reply("Пожалуйста, введите описание расхода или введите /stop для отмены.")
-
-
-@dp.message_handler(state=FinanceState.waiting_for_description)
-async def handle_description(message: types.Message, state: FSMContext):
-    description = message.text.strip()
-
-    if description.lower() == '/stop':
-        await message.reply("Добавление описания отменено.")
-        await state.finish()
-        return
-
-    user_data = await state.get_data()
-    category = user_data.get('expense_category')
-    amount = user_data.get('expense_amount')
-
-    try:
-        await job_json.description_operation(
-            user_id=message.from_user.id,
-            description=description,
-            type='Расход',
-            category=category,
-            amount=amount
-        )
-        await message.reply(f"Описание '{description}' добавлено к расходу в категории '{category}' на сумму {amount}.")
-        logging.info(
-            f"Пользователь {message.from_user.id} добавил описание к расходу: {category} - {amount} - {description}")
-    except Exception as e:
-        logging.error(f"Ошибка при добавлении описания для пользователя {message.from_user.id}: {e}")
-        await message.reply(f"Произошла ошибка при добавлении описания: {e}")
-    finally:
-        await state.finish()
-
-
 # Обработчик категории доходов
 @dp.callback_query_handler(lambda c: c.data == 'manage_income')
 async def handle_income_category(callback_query: types.CallbackQuery):
@@ -243,13 +195,14 @@ async def process_income_category(callback_query: types.CallbackQuery, state: FS
     await callback_query.answer()
 
 
-# Обработчик ввода суммы дохода
+# Обработчик ввода суммы доходов
 @dp.message_handler(state=FinanceState.waiting_for_income_amount)
 async def handle_income_amount(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     category = user_data.get('income_category')
+    datetime_str = user_data.get('income_category')
     amount = message.text.strip()
-
+    print(message.from_user.id, category, int(amount))
     if amount.lower() == '/stop':
         await message.reply("Операция отменена.")
         await state.finish()
@@ -260,72 +213,67 @@ async def handle_income_amount(message: types.Message, state: FSMContext):
         return
 
     try:
+        current_time = datetime.datetime.now()
+        date_str = current_time.strftime("%d.%m.%Y")
+        time_str = current_time.strftime("%H:%M:%S")
         await job_xls.data_validator(message.from_user.id, category, int(amount))
-        await state.update_data(income_amount=amount)  # Сохраняем сумму в состоянии
+        await job_json.description_operation(user_id=message.from_user.id, type_operation='Доход',
+                                             category=category, amount=int(amount),
+                                             date_str=date_str, time_str=time_str)
         keyboard = InlineKeyboardMarkup(row_width=2)
         keyboard.add(
             InlineKeyboardButton(text='Получить таблицу', callback_data='manage_output'),
-            InlineKeyboardButton(text='Добавить описание', callback_data='get_income_description')
+            InlineKeyboardButton(text='Добавить описание', callback_data=f'get_description_{date_str}_{time_str}')
         )
-        await message.reply(f"Доход в категории '{category}' на сумму {amount} успешно добавлен!",
-                            reply_markup=keyboard)
+        await message.reply(f"Доход в категории '{category}' на сумму {amount} успешно добавлен!", reply_markup=keyboard)
         logging.info(f"Пользователь {message.from_user.id} добавил доход: {category} - {amount}")
-        # Устанавливаем состояние ожидания действия по доходу
-        await FinanceState.waiting_for_income_action.set()
     except Exception as e:
         logging.error(f"Ошибка при добавлении дохода для пользователя {message.from_user.id}: {e}")
         await message.reply(f"Произошла ошибка при добавлении дохода: {e}")
+    finally:
         await state.finish()
 
 
-# Обработчик нажатия на кнопку «Добавить описание» для доходов
-@dp.callback_query_handler(lambda c: c.data == 'get_income_description', state=FinanceState.waiting_for_income_action)
-async def handle_get_income_description(callback_query: types.CallbackQuery, state: FSMContext):
-    user_data = await state.get_data()
-    category = user_data.get('income_category')
-    amount = user_data.get('income_amount')
+# Обработчик нажатия на кнопку "Добавить описание"
+@dp.callback_query_handler(lambda c: c.data.startswith('get_description_'))
+async def handle_get_description(callback_query: types.CallbackQuery, state: FSMContext):
+    # Извлечение даты и времени из callback_data
+    callback_data_parts = callback_query.data.split('_')
+    date_str = callback_data_parts[2]
+    time_str = callback_data_parts[3]
 
-    if not category or not amount:
-        await callback_query.message.reply("Не удалось получить данные операции. Попробуйте еще раз.")
-        await state.finish()
-        return
+    # Сохранение даты и времени в state (чтобы использовать при вводе текста)
+    await state.update_data(date_str=date_str, time_str=time_str)
 
-    await FinanceState.waiting_for_income_description.set()
-    await callback_query.message.reply("Пожалуйста, введите описание дохода или введите /stop для отмены.")
+    # Сообщение пользователю с просьбой ввести текст описания
+    await callback_query.message.reply("Пожалуйста, введите описание или напишите /stop для отмены.")
+    await FinanceState.waiting_for_description.set()  # Перевод в состояние ожидания описания
     await callback_query.answer()
 
 
-# Обработчик ввода описания дохода
-@dp.message_handler(state=FinanceState.waiting_for_income_description)
-async def handle_income_description(message: types.Message, state: FSMContext):
-    description = message.text.strip()
-
-    if description.lower() == '/stop':
-        await message.reply("Добавление описания отменено.")
+# Обработчик ввода описания
+@dp.message_handler(state=FinanceState.waiting_for_description)
+async def process_description(message: types.Message, state: FSMContext):
+    # Если пользователь вводит команду /stop, отменяем ввод
+    if message.text.lower() == '/stop':
+        await message.reply("Операция добавления описания отменена.")
         await state.finish()
         return
 
+    # Получаем дату и время из state
     user_data = await state.get_data()
-    category = user_data.get('income_category')
-    amount = user_data.get('income_amount')
+    date_str = user_data.get('date_str')
+    time_str = user_data.get('time_str')
 
-    try:
-        # Асинхронно вызываем функцию сохранения описания
-        await job_json.description_operation(
-            user_id=message.from_user.id,
-            description=description,
-            type='Доход',
-            category=category,
-            amount=amount
-        )
-        await message.reply(f"Описание '{description}' добавлено к доходу в категории '{category}' на сумму {amount}.")
-        logging.info(
-            f"Пользователь {message.from_user.id} добавил описание к доходу: {category} - {amount} - {description}")
-    except Exception as e:
-        logging.error(f"Ошибка при добавлении описания для пользователя {message.from_user.id}: {e}")
-        await message.reply(f"Произошла ошибка при добавлении описания: {e}")
-    finally:
-        await state.finish()
+    # Сообщение пользователю с введенным текстом и временем создания кнопки
+    await job_json.get_description_text(user_id=message.from_user.id, date_str=date_str,
+                                        time_str=time_str, description=message.text)
+    await message.reply(f"Описание: '{message.text}' было добавлено."
+                        f"\nКнопка была создана {date_str} в {time_str}.")
+
+    # Завершение состояния
+    await state.finish()
+
 
 
 # Обработчик категории расходов
@@ -372,23 +320,34 @@ async def handle_expense_amount(message: types.Message, state: FSMContext):
         return
 
     try:
+        current_time = datetime.datetime.now()
+        date_str = current_time.strftime("%d.%m.%Y")
+        time_str = current_time.strftime("%H:%M:%S")
+
+        # Добавляем запись о расходах в JSON файл
+        await job_json.description_operation(user_id=message.from_user.id, type_operation='Расход',
+                                             category=category, amount=int(amount),
+                                             date_str=date_str, time_str=time_str)
+
+        # Валидируем и добавляем данные в Excel таблицу
         await job_xls.data_validator(message.from_user.id, category, int(amount))
-        await state.update_data(expense_amount=amount)  # Сохраняем сумму в состоянии
+
+        # Создаем клавиатуру с кнопками
         keyboard = InlineKeyboardMarkup(row_width=2)
         keyboard.add(
             InlineKeyboardButton(text='Получить таблицу', callback_data='manage_output'),
-            InlineKeyboardButton(text='Добавить описание', callback_data='get_description')
+            InlineKeyboardButton(text='Добавить описание', callback_data=f'get_description_{date_str}_{time_str}')
         )
-        await message.reply(f"Расход в категории '{category}' на сумму {amount} успешно добавлен!",
-                            reply_markup=keyboard)
+
+        await message.reply(f"Расход в категории '{category}' на сумму {amount} успешно добавлен!", reply_markup=keyboard)
         logging.info(f"Пользователь {message.from_user.id} добавил расход: {category} - {amount}")
-        # Устанавливаем новое состояние без завершения текущего
-        await FinanceState.waiting_for_expense_action.set()
+
     except Exception as e:
         logging.error(f"Ошибка при добавлении расхода для пользователя {message.from_user.id}: {e}")
         await message.reply(f"Произошла ошибка при добавлении расхода: {e}")
-        await state.finish()  # Завершаем состояние только в случае ошибки
 
+    finally:
+        await state.finish()
 
 @dp.message_handler()
 async def message_processing(message: types.Message):
