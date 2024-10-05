@@ -3,6 +3,8 @@ import shutil
 import datetime
 import logging
 
+from dotenv import load_dotenv
+
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -15,8 +17,10 @@ import job_json
 # Логирование настроено на уровень DEBUG для подробного вывода
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
 
+load_dotenv()
+
 # Инициализация бота и диспетчера с хранилищем состояний в памяти
-bot_token = ('5184064788:AAHpyj6L6z7A2oSWT0JRvXNZe-6r9varvgU')  # Рекомендуется использовать переменные окружения для хранения токенов
+bot_token = os.getenv('MY_VAR')
 if not bot_token:
     raise ValueError("Необходимо указать BOT_TOKEN в переменных окружения.")
 
@@ -34,10 +38,18 @@ class FinanceState(StatesGroup):
     waiting_for_description = State()
 
 
-
 # Обработчик команды /start
 @dp.message_handler(commands=['start'])
 async def start_command(message: types.Message):
+    """
+    Функция для обработки команды /start
+    :param message: Аргумент в котором хранится вся необходимая информация
+
+    :type message: str
+
+    :return: Создает папку с id пользователя в которой создается Excel-таблица для хранения данных, а также в этой
+    же папке будет создан json-файл для более детальной информации про каждую операцию
+    """
     user_id = message.from_user.id
     folder_path = f'user_files/{user_id}'
 
@@ -70,6 +82,14 @@ async def start_command(message: types.Message):
 # Обработчик команды /help
 @dp.message_handler(commands=['help'])
 async def help_command(message: types.Message):
+    """
+        Функция для обработки команды /help
+        :param message: Аргумент в котором хранится вся необходимая информация
+
+        :type message: str
+
+        :return: Выводит все доступные команды и их возможности
+        """
     help_text = (
         "*Добро пожаловать в финансового помощника!*\n\n"
         "Этот бот поможет вам вести учет ваших доходов и расходов, сохраняя всю информацию в Excel-таблицах. "
@@ -96,6 +116,14 @@ async def help_command(message: types.Message):
 # Обработчик команды /get_tables
 @dp.message_handler(commands=['get_tables'])
 async def get_tables_command(message: types.Message):
+    """
+    Функция для обработки команды /get_tables
+    :param message: Аргумент в котором хранится вся необходимая информация
+
+    :type message: str
+
+    :return: Скидывает Excel-таблицу пользователю
+    """
     file_path = f'user_files/{message.from_user.id}/{message.from_user.id}.xlsx'
 
     if os.path.exists(file_path):
@@ -113,6 +141,14 @@ async def get_tables_command(message: types.Message):
 # Обработчик команды /manage_finance
 @dp.message_handler(commands=['manage_finance'])
 async def manage_finance_command(message: types.Message):
+    """
+        Функция для обработки команды /manage_finance
+        :param message: Аргумент в котором хранится вся необходимая информация
+
+        :type message: str
+
+        :return: Выводит сообщение с кнопками 'Доходы', 'Расходы', 'Получить таблицу'
+        """
     keyboard = InlineKeyboardMarkup(row_width=2)
     keyboard.add(
         InlineKeyboardButton(text='Доходы', callback_data='manage_income'),
@@ -125,6 +161,17 @@ async def manage_finance_command(message: types.Message):
 # Обработчик нажатия на кнопки
 @dp.callback_query_handler(lambda c: c.data.startswith('reset_'))
 async def process_reset_callback(callback_query: types.CallbackQuery):
+    """
+    Функция для обработки нажатия на кнопки с префиксом reset_
+    :param callback_query: Аргумент, содержащий информацию о callback запросе (нажатии кнопки)
+
+    :type callback_query: types.CallbackQuery
+
+    :return: В зависимости от действия, полученного из callback запроса, функция либо вызывает процесс сброса данных
+    пользователя (reset_user_data), либо продолжает работу с существующими данными (continue_with_existing_data).
+    Если действие — "yes", данные пользователя сбрасываются, если "no" — работа продолжается без сброса данных.
+    """
+
     action = callback_query.data.split('_')[1]
     if action == "yes":
         await reset_user_data(callback_query)
@@ -134,6 +181,26 @@ async def process_reset_callback(callback_query: types.CallbackQuery):
 
 # Функция для сброса данных пользователя
 async def reset_user_data(callback_query: types.CallbackQuery):
+    """
+    Функция для сброса данных пользователя
+    :param callback_query: Аргумент, содержащий информацию о callback запросе (нажатии кнопки)
+
+    :type callback_query: Types.CallbackQuery
+
+    :return: Удаляет папку с данными пользователя и создает новую Excel-таблицу для хранения данных. Если папка с данными
+    пользователя существует, она удаляется, и создается новая таблица. В случае отсутствия папки, выводится предупреждение
+    и отправляется сообщение с предложением создать данные с помощью команды /start.
+
+    Логирование:
+    - В случае успешного сброса данных пользователя выводится сообщение в лог о том, что данные сброшены.
+    - В случае отсутствия данных выводится предупреждение о том, что папка пользователя не существует.
+
+    Задействованные функции:
+    - `job_xls.create_xls(user_id)`: Создает новую Excel-таблицу для пользователя.
+    - `callback_query.answer()`: Показывает всплывающее уведомление о успешной операции.
+    - `callback_query.message.answer()`: Отправляет сообщение пользователю, если папка отсутствует.
+    """
+
     user_id = callback_query.from_user.id
     folder_path = f'user_files/{user_id}'
 
@@ -149,6 +216,22 @@ async def reset_user_data(callback_query: types.CallbackQuery):
 
 # Функция для продолжения работы с существующими данными
 async def continue_with_existing_data(callback_query: types.CallbackQuery):
+    """
+    Функция для продолжения работы с существующими данными
+    :param callback_query: Аргумент, содержащий информацию о callback запросе (нажатии кнопки)
+
+    :type callback_query: Types.CallbackQuery
+
+    :return: Функция информирует пользователя, что работа с существующими данными продолжается, и выводит соответствующее
+    уведомление. В лог записывается информация о том, что пользователь продолжил работу без сброса данных.
+
+    Логирование:
+    - Логируется ID пользователя и факт продолжения работы с существующими данными.
+
+    Используемые методы:
+    - `callback_query.answer()`: Отправляет пользователю уведомление с сообщением о том, что работа продолжается.
+    """
+
     logging.info(f"Пользователь {callback_query.from_user.id} продолжает работу с существующими данными.")
     await callback_query.answer("Продолжаем заполнять ваш финансовый отчет.", show_alert=True)
 
@@ -156,6 +239,27 @@ async def continue_with_existing_data(callback_query: types.CallbackQuery):
 # Обработчик вывода таблицы
 @dp.callback_query_handler(lambda c: c.data == 'manage_output')
 async def handle_output(callback_query: types.CallbackQuery):
+    """
+    Функция для обработки вывода таблицы пользователю
+    :param callback_query: Аргумент, содержащий информацию о callback запросе (нажатии кнопки)
+
+    :type callback_query: types.CallbackQuery
+
+    :return: Функция проверяет наличие Excel-файла с данными пользователя. Если файл существует, он отправляется пользователю.
+    В случае успешной отправки логируется информация о действии. Если файл не найден, пользователю отправляется сообщение об ошибке,
+    а в лог записывается предупреждение. Если при отправке файла возникает ошибка, она логируется, и пользователю отправляется сообщение об ошибке.
+
+    Логирование:
+    - Логируется факт успешной отправки файла пользователю.
+    - В случае ошибки при отправке файла записывается ошибка с подробностями.
+    - Логируется предупреждение, если файл не найден.
+
+    Используемые методы:
+    - `callback_query.message.answer_document()`: Отправляет файл Excel пользователю.
+    - `callback_query.message.reply()`: Отправляет сообщение пользователю в случае ошибки или отсутствия файла.
+    - `callback_query.answer()`: Закрывает уведомление о нажатии кнопки для предотвращения блокировки интерфейса.
+    """
+
     file_path = f'user_files/{callback_query.from_user.id}/{callback_query.from_user.id}.xlsx'
 
     if os.path.exists(file_path):
@@ -174,6 +278,29 @@ async def handle_output(callback_query: types.CallbackQuery):
 # Обработчик категории доходов
 @dp.callback_query_handler(lambda c: c.data == 'manage_income')
 async def handle_income_category(callback_query: types.CallbackQuery):
+    """
+    Функция для обработки выбора категории доходов
+    :param callback_query: Аргумент, содержащий информацию о callback запросе (нажатии кнопки)
+
+    :type callback_query: Types.CallbackQuery
+
+    :return: Функция выводит пользователю кнопки с возможными категориями доходов для выбора. Каждая кнопка содержит текст категории и
+    уникальные данные для callback запроса. После этого пользователю отправляется сообщение с предложением выбрать категорию дохода.
+
+    Категории доходов:
+    - "Зп на руки"
+    - "Зп на карточку"
+    - "Шабашки"
+    - "Другие"
+
+    Используемые методы:
+    - `callback_query.message.reply()`: Отправляет сообщение с кнопками, позволяющими выбрать категорию дохода.
+    - `callback_query.answer()`: Закрывает уведомление о нажатии кнопки для предотвращения блокировки интерфейса.
+
+    Примечание:
+    Кнопки для выбора категории доходов организованы в два столбца (row_width=2).
+    """
+
     keyboard = InlineKeyboardMarkup(row_width=2)
     categories = [
         "Зп на руки", "Зп на карточку", "Шабашки", "Другие"
@@ -187,6 +314,34 @@ async def handle_income_category(callback_query: types.CallbackQuery):
 # Обработчик выбора категории доходов
 @dp.callback_query_handler(lambda c: c.data.startswith('income_'))
 async def process_income_category(callback_query: types.CallbackQuery, state: FSMContext):
+    """
+    Функция для обработки выбора категории доходов
+    :param callback_query: Аргумент, содержащий информацию о callback запросе (нажатии кнопки)
+    :param state: Объект состояния FSMContext, используемый для хранения состояния пользователя
+
+    :type callback_query: types.CallbackQuery
+    :type state: FSMContext
+
+    :return: Функция извлекает выбранную категорию доходов из callback запроса, обновляет состояние с выбранной категорией
+    и переводит пользователя в состояние ожидания ввода суммы дохода. После этого отправляется сообщение с запросом
+    ввода суммы дохода.
+
+    Логика работы:
+    1. Из callback запроса извлекается категория дохода (например, 'Зп на руки', 'Шабашки').
+    2. Обновляется состояние пользователя с новой категорией дохода (`income_category`).
+    3. Пользователю отправляется сообщение с запросом на ввод суммы дохода.
+    4. Переводится состояние FinaceState в режим ожидания (`waiting_for_income_amount`).
+
+    Используемые методы:
+    - `state.update_data()`: Обновляет данные состояния пользователя.
+    - `callback_query.message.answer()`: Отправляет сообщение с запросом на ввод суммы.
+    - `FinanceState.waiting_for_income_amount.set()`: Переводит состояние пользователя в режим ожидания ввода суммы.
+    - `callback_query.answer()`: Закрывает уведомление о нажатии кнопки для предотвращения блокировки интерфейса.
+
+    Примечание:
+    Состояние пользователя используется для хранения выбранной категории дохода и последующего запроса суммы.
+    """
+
     category = callback_query.data.split('_')[1]
     await state.update_data(income_category=category)
 
@@ -198,6 +353,41 @@ async def process_income_category(callback_query: types.CallbackQuery, state: FS
 # Обработчик ввода суммы доходов
 @dp.message_handler(state=FinanceState.waiting_for_income_amount)
 async def handle_income_amount(message: types.Message, state: FSMContext):
+    """
+    Функция для обработки ввода суммы доходов
+    :param message: Сообщение, содержащее текст с суммой дохода
+    :param state: Объект состояния FSMContext, используемый для хранения состояния пользователя
+
+    :type message: types.Message
+    :type state: FSMContext
+
+    :return: Функция обрабатывает введенную сумму дохода, проверяет корректность ввода и добавляет данные в таблицу и JSON-файл.
+    В случае успешного добавления дохода пользователю выводится сообщение с подтверждением и кнопками для дальнейших действий.
+    Если ввод некорректен (не числовой), пользователю предлагается ввести сумму заново или отменить операцию.
+
+    Логика работы:
+    1. Получение данных из состояния FSMContext, таких как категория дохода.
+    2. Проверка введенной суммы на корректность:
+       - Если сумма не является числом, пользователю предлагается повторить ввод.
+       - Если сумма корректна, данные добавляются в таблицу Excel и JSON-файл.
+    3. После успешного добавления дохода пользователю отправляется сообщение с предложением получить таблицу или добавить описание операции.
+    4. Если ввод "/stop", операция отменяется, и состояние сбрасывается.
+    5. В случае ошибки отправляется сообщение об ошибке, и она логируется.
+
+    Используемые методы:
+    - `state.get_data()`: Получает данные, сохраненные в состоянии пользователя.
+    - `message.reply()`: Отправляет ответное сообщение пользователю.
+    - `job_xls.data_validator()`: Проверяет и добавляет данные о доходе в Excel-таблицу.
+    - `job_json.description_operation()`: Добавляет информацию об операции в JSON-файл.
+    - `logging.info()`: Логирует успешное добавление дохода.
+    - `logging.error()`: Логирует ошибку, если она возникает при добавлении данных.
+    - `state.finish()`: Завершает текущее состояние FSM.
+
+    Примечание:
+    - Если сумма не введена корректно, пользователю отправляется запрос повторить ввод.
+    - Если введена команда "/stop", операция отменяется, и состояние сбрасывается.
+    """
+
     user_data = await state.get_data()
     category = user_data.get('income_category')
     datetime_str = user_data.get('income_category')
@@ -225,7 +415,8 @@ async def handle_income_amount(message: types.Message, state: FSMContext):
             InlineKeyboardButton(text='Получить таблицу', callback_data='manage_output'),
             InlineKeyboardButton(text='Добавить описание', callback_data=f'get_description_{date_str}_{time_str}')
         )
-        await message.reply(f"Доход в категории '{category}' на сумму {amount} успешно добавлен!", reply_markup=keyboard)
+        await message.reply(f"Доход в категории '{category}' на сумму {amount} успешно добавлен!",
+                            reply_markup=keyboard)
         logging.info(f"Пользователь {message.from_user.id} добавил доход: {category} - {amount}")
     except Exception as e:
         logging.error(f"Ошибка при добавлении дохода для пользователя {message.from_user.id}: {e}")
@@ -237,6 +428,34 @@ async def handle_income_amount(message: types.Message, state: FSMContext):
 # Обработчик нажатия на кнопку "Добавить описание"
 @dp.callback_query_handler(lambda c: c.data.startswith('get_description_'))
 async def handle_get_description(callback_query: types.CallbackQuery, state: FSMContext):
+    """
+    Функция для обработки нажатия на кнопку "Добавить описание"
+    :param callback_query: Аргумент, содержащий информацию о callback запросе (нажатии кнопки)
+    :param state: Объект состояния FSMContext, используемый для хранения состояния пользователя
+
+    :type callback_query: types.CallbackQuery
+    :type state: FSMContext
+
+    :return: Функция извлекает дату и время операции из callback данных и сохраняет их в состоянии FSM для дальнейшего использования.
+    Пользователю отправляется сообщение с просьбой ввести текст описания, после чего состояние переводится в режим ожидания ввода описания.
+
+    Логика работы:
+    1. Из callback данных извлекаются дата и время операции, которые сохраняются в состоянии FSM для последующего использования при добавлении описания.
+    2. Пользователю отправляется сообщение с запросом на ввод описания для выбранной операции.
+    3. Состояние пользователя переводится в `FinanceState.waiting_for_description`, чтобы обработчик мог ожидать ввод текста.
+    4. Callback запрос завершается с помощью метода `callback_query.answer()`, чтобы не блокировать интерфейс.
+
+    Используемые методы:
+    - `callback_query.data.split()`: Извлекает дату и время из callback данных.
+    - `state.update_data()`: Сохраняет дату и время операции в состоянии пользователя.
+    - `callback_query.message.reply()`: Отправляет сообщение с просьбой ввести описание операции.
+    - `FinanceState.waiting_for_description.set()`: Переводит состояние пользователя в режим ожидания ввода описания.
+    - `callback_query.answer()`: Закрывает уведомление о нажатии кнопки для предотвращения блокировки интерфейса.
+
+    Примечание:
+    Пользователь может ввести описание для выбранной операции или отменить ввод, написав "/stop".
+    """
+
     # Извлечение даты и времени из callback_data
     callback_data_parts = callback_query.data.split('_')
     date_str = callback_data_parts[2]
@@ -254,6 +473,34 @@ async def handle_get_description(callback_query: types.CallbackQuery, state: FSM
 # Обработчик ввода описания
 @dp.message_handler(state=FinanceState.waiting_for_description)
 async def process_description(message: types.Message, state: FSMContext):
+    """
+    Функция для обработки нажатия на кнопку "Добавить описание"
+    :param callback_query: Аргумент, содержащий информацию о callback запросе (нажатии кнопки)
+    :param state: Объект состояния FSMContext, используемый для хранения состояния пользователя
+
+    :type callback_query: types.CallbackQuery
+    :type state: FSMContext
+
+    :return: Функция извлекает дату и время операции из callback данных и сохраняет их в состоянии для дальнейшего использования.
+    Пользователю отправляется сообщение с просьбой ввести текст описания, после чего состояние переводится в режим ожидания ввода описания.
+
+    Логика работы:
+    1. Из callback данных извлекаются дата и время операции, которые сохраняются в состояние FSM.
+    2. Пользователю отправляется сообщение с запросом на ввод описания операции.
+    3. Состояние пользователя переводится в `FinanceState.waiting_for_description` для ожидания ввода описания.
+    4. Callback запрос завершается, чтобы избежать блокировки интерфейса.
+
+    Используемые методы:
+    - `callback_query.data.split()`: Извлекает дату и время из callback данных.
+    - `state.update_data()`: Сохраняет дату и время операции в состоянии пользователя.
+    - `callback_query.message.reply()`: Отправляет сообщение с просьбой ввести описание операции.
+    - `FinanceState.waiting_for_description.set()`: Переводит состояние пользователя в режим ожидания ввода описания.
+    - `callback_query.answer()`: Закрывает уведомление о нажатии кнопки для предотвращения блокировки интерфейса.
+
+    Примечание:
+    Пользователь может ввести описание для выбранной операции, либо отменить операцию, написав "/stop".
+    """
+
     # Если пользователь вводит команду /stop, отменяем ввод
     if message.text.lower() == '/stop':
         await message.reply("Операция добавления описания отменена.")
@@ -268,17 +515,32 @@ async def process_description(message: types.Message, state: FSMContext):
     # Сообщение пользователю с введенным текстом и временем создания кнопки
     await job_json.get_description_text(user_id=message.from_user.id, date_str=date_str,
                                         time_str=time_str, description=message.text)
-    await message.reply(f"Описание: '{message.text}' было добавлено."
-                        f"\nКнопка была создана {date_str} в {time_str}.")
+    await message.reply(f"Описание успешно добавлено.")
 
     # Завершение состояния
     await state.finish()
 
 
-
 # Обработчик категории расходов
 @dp.callback_query_handler(lambda c: c.data == 'manage_expense')
 async def handle_expense_category(callback_query: types.CallbackQuery):
+    """
+    Функция для обработки выбора категории расходов
+    :param callback_query: Аргумент, содержащий информацию о callback запросе (нажатии кнопки)
+
+    :type callback_query: types.CallbackQuery
+
+    :return: Функция выводит пользователю кнопки с возможными категориями расходов для выбора. Каждая кнопка содержит текст категории и
+    уникальные данные для callback запроса. После этого пользователю отправляется сообщение с предложением выбрать категорию расхода.
+
+    Используемые методы:
+    - `callback_query.message.reply()`: Отправляет сообщение с кнопками, позволяющими выбрать категорию расхода.
+    - `callback_query.answer()`: Закрывает уведомление о нажатии кнопки для предотвращения блокировки интерфейса.
+
+    Примечание:
+    Кнопки для выбора категории расходов организованы в три столбца (row_width=3).
+    """
+
     keyboard = InlineKeyboardMarkup(row_width=3)
     categories = [
         "Жилье", "Коммуналка", "Еда", "Проезд", "Интернет", "Сотовая связь",
@@ -295,6 +557,23 @@ async def handle_expense_category(callback_query: types.CallbackQuery):
 # Обработчик выбора категории расходов
 @dp.callback_query_handler(lambda c: c.data.startswith('expense_'))
 async def process_expense_category(callback_query: types.CallbackQuery, state: FSMContext):
+    """
+    Функция для обработки выбора категории расходов
+    :param callback_query: Аргумент, содержащий информацию о callback запросе (нажатии кнопки)
+
+    :type callback_query: Types.CallbackQuery
+
+    :return: Функция выводит пользователю кнопки с возможными категориями расходов для выбора. Каждая кнопка содержит текст категории и
+    уникальные данные для callback запроса. После этого пользователю отправляется сообщение с предложением выбрать категорию расхода.
+
+    Используемые методы:
+    - `callback_query.message.reply()`: Отправляет сообщение с кнопками, позволяющими выбрать категорию расхода.
+    - `callback_query.answer()`: Закрывает уведомление о нажатии кнопки для предотвращения блокировки интерфейса.
+
+    Примечание:
+    Кнопки для выбора категории расходов организованы в три столбца (row_width=3).
+    """
+
     category = callback_query.data.split('_')[1]
     await state.update_data(expense_category=category)
 
@@ -306,6 +585,41 @@ async def process_expense_category(callback_query: types.CallbackQuery, state: F
 # Обработчик ввода суммы расходов
 @dp.message_handler(state=FinanceState.waiting_for_expense_amount)
 async def handle_expense_amount(message: types.Message, state: FSMContext):
+    """
+    Функция для обработки ввода суммы расходов
+    :param message: Сообщение, содержащее текст с суммой расхода
+    :param state: Объект состояния FSMContext, используемый для хранения состояния пользователя
+
+    :type message: types.Message
+    :type state: FSMContext
+
+    :return: Функция обрабатывает введенную сумму расхода, проверяет корректность ввода и добавляет данные в таблицу и JSON-файл.
+    В случае успешного добавления расхода пользователю выводится сообщение с подтверждением и кнопками для дальнейших действий.
+    Если ввод некорректен (не числовой), пользователю предлагается ввести сумму заново или отменить операцию.
+
+    Логика работы:
+    1. Получение данных из состояния FSMContext, таких как категория расхода.
+    2. Проверка введенной суммы на корректность:
+       - Если сумма не является числом, пользователю предлагается повторить ввод.
+       - Если сумма корректна, данные добавляются в таблицу Excel и JSON-файл.
+    3. После успешного добавления расхода пользователю отправляется сообщение с предложением получить таблицу или добавить описание операции.
+    4. Если ввод "/stop", операция отменяется, и состояние сбрасывается.
+    5. В случае ошибки отправляется сообщение об ошибке, и она логируется.
+
+    Используемые методы:
+    - `state.get_data()`: Получает данные, сохраненные в состоянии пользователя.
+    - `message.reply()`: Отправляет ответное сообщение пользователю.
+    - `job_xls.data_validator()`: Проверяет и добавляет данные о расходе в Excel-таблицу.
+    - `job_json.description_operation()`: Добавляет информацию об операции в JSON-файл.
+    - `logging.info()`: Логирует успешное добавление расхода.
+    - `logging.error()`: Логирует ошибку, если она возникает при добавлении данных.
+    - `state.finish()`: Завершает текущее состояние FSM.
+
+    Примечание:
+    - Если сумма не введена корректно, пользователю отправляется запрос повторить ввод.
+    - Если введена команда "/stop", операция отменяется, и состояние сбрасывается.
+    """
+
     user_data = await state.get_data()
     category = user_data.get('expense_category')
     amount = message.text.strip()
@@ -339,7 +653,8 @@ async def handle_expense_amount(message: types.Message, state: FSMContext):
             InlineKeyboardButton(text='Добавить описание', callback_data=f'get_description_{date_str}_{time_str}')
         )
 
-        await message.reply(f"Расход в категории '{category}' на сумму {amount} успешно добавлен!", reply_markup=keyboard)
+        await message.reply(f"Расход в категории '{category}' на сумму {amount} успешно добавлен!",
+                            reply_markup=keyboard)
         logging.info(f"Пользователь {message.from_user.id} добавил расход: {category} - {amount}")
 
     except Exception as e:
@@ -349,8 +664,35 @@ async def handle_expense_amount(message: types.Message, state: FSMContext):
     finally:
         await state.finish()
 
+
 @dp.message_handler()
 async def message_processing(message: types.Message):
+    """
+    Функция для обработки всех входящих сообщений
+    :param message: Сообщение, отправленное пользователем
+
+    :type message: types.Message
+
+    :return: Функция обрабатывает текст сообщения пользователя. Если текст сообщения равен "Расходы за месяц", функция
+    извлекает данные о расходах за текущий месяц из Excel-таблицы и отправляет их пользователю. Расходы берутся из определенной
+    ячейки, соответствующей текущему месяцу.
+
+    Логика работы:
+    1. Определение текущего месяца с помощью функции `datetime.datetime.now().month`.
+    2. Если текст сообщения равен "Расходы за месяц", из Excel-таблицы пользователя извлекаются данные о расходах:
+       - Значение из строки 30 для соответствующего столбца месяца.
+       - Название месяца из строки 12 для того же столбца.
+    3. Пользователю отправляется сообщение с информацией о расходах за текущий месяц.
+
+    Используемые методы:
+    - `job_xls.get_cell_value()`: Получает значение из указанной ячейки Excel-таблицы пользователя.
+    - `message.reply()`: Отправляет ответное сообщение пользователю с информацией о его расходах за текущий месяц.
+
+    Примечание:
+    - В `month_id` содержится сопоставление номеров месяцев с буквами столбцов, в которых хранятся данные о месячных расходах.
+    - Функция предполагает, что данные о расходах находятся в строке 30, а название месяца — в строке 12 Excel-таблицы.
+    """
+
     month_id = {
         1: 'H', 2: 'I', 3: 'J', 4: 'K',
         5: 'L', 6: 'M', 7: 'N', 8: 'C',
