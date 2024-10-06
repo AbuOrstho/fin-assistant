@@ -740,8 +740,14 @@ async def send_daily_message():
     for chat_id in chat_ids:
         try:
             res = await job_json.read_and_process_file(chat_id)
-            print(res)
-            await bot.send_message(chat_id=chat_id, text=res, parse_mode="MarkdownV2")
+            await bot.send_message(chat_id=chat_id, text='''
+            Бот был обновлён\! 🎉
+
+Теперь бот может добавлять **описания к транзакциям**, а также будет **каждый день в 23:00** отправлять вам отчет за прошедший день\. 📊
+
+Если у вас есть идеи или предложения по улучшению, не стесняйтесь отправлять их сюда — [@vay\_ahi](https://t.me/vay_ahi)\.
+
+Мы всегда рады вашим отзывам\! 🙌''', parse_mode="MarkdownV2")
         except Exception as e:
             logging.error(f"Ошибка при отправке сообщения пользователю {chat_id}: {e}")
 
@@ -768,7 +774,7 @@ async def scheduler_setup():
     - Задача `send_daily_message()` будет выполняться каждый день в 23:00 по московскому времени.
     """
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")  # Укажите нужный вам часовой пояс
-    scheduler.add_job(send_daily_message, 'cron', hour=23, minute=00)  # Настройка на 23:00
+    scheduler.add_job(send_daily_message, 'cron', hour=00, minute=00)  # Настройка на 23:00
     scheduler.start()
 
 
