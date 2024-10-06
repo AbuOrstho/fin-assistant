@@ -2,8 +2,11 @@ import os
 import shutil
 import datetime
 import logging
+import asyncio
 
 from dotenv import load_dotenv
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputFile
@@ -705,6 +708,72 @@ async def message_processing(message: types.Message):
         await message.reply(text=f"Расходы за {m[0]} составляют {amount[0]}")
 
 
+# Функция для отправки сообщения всем пользователям из списка
+async def send_daily_message():
+    """
+    Асинхронная функция для отправки ежедневного сообщения всем пользователям из списка
+    :return: Функция проходит по списку папок с ID пользователей, извлекает данные для каждого пользователя, и отправляет
+    сообщение с результатами обработки данных. Если возникает ошибка при отправке, она логируется.
+
+    Логика работы:
+    1. Определяется список ID пользователей на основе имен папок в директории 'user_files'. Каждая папка в этой директории
+    представляет собой ID пользователя.
+    2. Для каждого пользователя (папки) вызывается функция `job_json.read_and_process_file()`, которая обрабатывает данные и возвращает текст сообщения.
+    3. Сообщение отправляется пользователю с помощью метода `bot.send_message()` с указанием ID чата.
+    4. В случае ошибки при обработке или отправке сообщения она логируется с подробной информацией о пользователе.
+
+    Используемые методы:
+    - `os.listdir()`: Возвращает список файлов и папок в указанной директории.
+    - `os.path.isdir()`: Проверяет, является ли элемент директорией (чтобы убедиться, что это папка пользователя).
+    - `job_json.read_and_process_file()`: Извлекает и обрабатывает данные из JSON-файла пользователя.
+    - `bot.send_message()`: Отправляет сообщение пользователю по его ID в формате MarkdownV2.
+    - `logging.error()`: Логирует ошибку, если сообщение не удалось отправить.
+
+    Примечание:
+    - Функция предполагает, что в директории 'user_files' каждая папка названа по ID пользователя, которому необходимо отправить сообщение.
+    - Обработка данных для каждого пользователя производится функцией `job_json.read_and_process_file()`.
+    """
+
+    folder_path = 'user_files'
+    # Список ID пользователей, которым бот будет отправлять сообщение
+    chat_ids = [f for f in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, f))]
+    for chat_id in chat_ids:
+        try:
+            res = await job_json.read_and_process_file(chat_id)
+            print(res)
+            await bot.send_message(chat_id=chat_id, text=res, parse_mode="MarkdownV2")
+        except Exception as e:
+            logging.error(f"Ошибка при отправке сообщения пользователю {chat_id}: {e}")
+
+
+# Планировщик задач для отправки сообщения каждый день в 23:00
+async def scheduler_setup():
+    """
+    Функция для настройки планировщика задач, отправляющего сообщения ежедневно в 23:00
+    :return: Функция создает и настраивает планировщик задач `AsyncIOScheduler`, который каждый день в 23:00 по московскому времени
+    запускает задачу `send_daily_message()`.
+
+    Логика работы:
+    1. Создается экземпляр `AsyncIOScheduler` с указанием часового пояса "Europe/Moscow".
+    2. В планировщике регистрируется задача `send_daily_message()` с использованием триггера `cron`, который запускает задачу каждый день в 23:00.
+    3. Планировщик запускается с помощью метода `scheduler.start()`.
+
+    Используемые методы:
+    - `AsyncIOScheduler()`: Создает асинхронный планировщик задач с возможностью настройки по времени и дате.
+    - `scheduler.add_job()`: Добавляет задачу в планировщик с указанием времени выполнения (каждый день в 23:00).
+    - `scheduler.start()`: Запускает планировщик, позволяя задачам выполняться в фоновом режиме.
+
+    Примечание:
+    - Планировщик использует часовой пояс "Europe/Moscow". Вы можете изменить его в зависимости от вашего региона.
+    - Задача `send_daily_message()` будет выполняться каждый день в 23:00 по московскому времени.
+    """
+    scheduler = AsyncIOScheduler(timezone="Europe/Moscow")  # Укажите нужный вам часовой пояс
+    scheduler.add_job(send_daily_message, 'cron', hour=23, minute=00)  # Настройка на 23:00
+    scheduler.start()
+
+
 if __name__ == "__main__":
     logging.info("Бот запущен и готов к работе.")
+    loop = asyncio.get_event_loop()
+    loop.create_task(scheduler_setup())  # Запускаем планировщик
     executor.start_polling(dp)
